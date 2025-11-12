@@ -127,7 +127,8 @@ door = get_door()
 if not door:
     forms.alert("No door selected. Please select a door to duplicate.", ok=True, exitscript=True)
 
-source_symbol = door.Symbol
+type_id = door.GetTypeId()
+source_symbol = doc.GetElement(type_id) if type_id else None
 if not source_symbol:
     forms.alert("Selected door has no type.", ok=True, exitscript=True)
 
