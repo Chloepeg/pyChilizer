@@ -2,6 +2,6 @@ title: Duplicate Door
 tooltip: |
   Duplicates the selected door's type, opens Type Properties + Properties, and starts placement with the new type.
   Adjust parameters in the dialogs, then click in the model to place the new door instance.
-  Author: pyChilizer
+  Author: Chloe
 
 
