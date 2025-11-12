@@ -13,12 +13,16 @@ logger = script.get_logger()
 output = script.get_output()
 
 
+DOOR_CATEGORY_ID = DB.ElementId(DB.BuiltInCategory.OST_Doors)
+
+
 def _is_door(elem):
-    return (
-        isinstance(elem, DB.FamilyInstance)
-        and elem.Category
-        and elem.Category.Id.IntegerValue == int(DB.BuiltInCategory.OST_Doors)
-    )
+    if not isinstance(elem, DB.FamilyInstance):
+        return False
+    cat = elem.Category
+    if not cat:
+        return False
+    return cat.Id == DOOR_CATEGORY_ID
 
 
 class DoorSelectionFilter(ISelectionFilter):
