@@ -1,5 +1,7 @@
 """Batch rename views with find/replace support."""
 
+# -*- coding: utf-8 -*-
+
 __title__ = 'Rename Views'
 __doc__ = 'Edit view names in bulk using a grid and find/replace.'
 
