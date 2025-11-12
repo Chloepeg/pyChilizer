@@ -23,6 +23,23 @@ def _is_door(elem):
     return cat.Id == DOOR_CATEGORY_ID
 
 
+def _get_symbol_name(symbol):
+    if not symbol:
+        return "Door Type"
+    param = symbol.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM)
+    if param:
+        try:
+            name_val = param.AsString()
+            if name_val:
+                return name_val
+        except Exception:
+            pass
+    try:
+        return symbol.Name
+    except AttributeError:
+        return "Door Type"
+
+
 class DoorSelectionFilter(ISelectionFilter):
     def AllowElement(self, elem):
         return _is_door(elem)
@@ -47,7 +64,7 @@ def _get_unique_type_name(base_name, family):
     for sid in family.GetFamilySymbolIds():
         sym = doc.GetElement(sid)
         if sym:
-            existing_names.add(sym.Name)
+            existing_names.add(_get_symbol_name(sym))
 
     if base_name not in existing_names:
         return base_name
@@ -61,7 +78,8 @@ def _get_unique_type_name(base_name, family):
 
 
 def _duplicate_symbol(symbol):
-    default_name = "{} Copy".format(symbol.Name)
+    symbol_name = _get_symbol_name(symbol)
+    default_name = "{} Copy".format(symbol_name)
     new_name = forms.ask_for_string(
         default=_get_unique_type_name(default_name, symbol.Family),
         prompt="Provide a name for the new door type (Cancel to reuse existing type)."
@@ -80,7 +98,7 @@ def _duplicate_symbol(symbol):
             doc.Regenerate()
         t.Commit()
 
-    logger.info("Duplicated door type '{}' to '{}'".format(symbol.Name, new_name))
+    logger.info("Duplicated door type '{}' to '{}'".format(symbol_name, new_name))
     return new_symbol, True
 
 
@@ -132,8 +150,10 @@ source_symbol = doc.GetElement(type_id) if type_id else None
 if not source_symbol:
     forms.alert("Selected door has no type.", ok=True, exitscript=True)
 
+source_symbol_name = _get_symbol_name(source_symbol)
+
 duplicate_type = forms.alert(
-    "Create a new door type based on '{}' before placement?".format(source_symbol.Name),
+    "Create a new door type based on '{}' before placement?".format(source_symbol_name),
     yes=True,
     no=True
 )
@@ -156,7 +176,7 @@ except Exception as err:
     logger.error("Could not start door placement: {}".format(err))
     forms.alert(
         "Couldn't start door placement automatically.\n"
-        "Activate the type '{}' manually and place the door.".format(target_symbol.Name),
+        "Activate the type '{}' manually and place the door.".format(_get_symbol_name(target_symbol)),
         ok=True,
         exitscript=True
     )
@@ -176,7 +196,9 @@ if type_cmd:
     except Exception as err:
         logger.debug("Type Properties command failed: {}".format(err))
 
-msg = "Door placement started using type '{}'.".format(target_symbol.Name)
+target_symbol_name = _get_symbol_name(target_symbol)
+
+msg = "Door placement started using type '{}'.".format(target_symbol_name)
 if duplicated:
     msg += "\nType Properties dialog has been opened so you can adjust parameters before placing."
 else:
