@@ -191,18 +191,18 @@ if type_cmd:
     except Exception as err:
         logger.debug("Type Properties command failed: {}".format(err))
 
-# Make sure the Properties palette is shown for instance edits (same as pressing PP)
-prop_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.Properties)
-if prop_cmd:
+# Toggle the Properties palette (same as pressing PP)
+toggle_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.TogglePropertiesPalette)
+if toggle_cmd:
     try:
-        revit.ui.PostCommand(prop_cmd)
+        revit.ui.PostCommand(toggle_cmd)
     except Exception as err:
-        logger.debug("Properties command failed: {}".format(err))
+        logger.debug("Toggle Properties command failed: {}".format(err))
 
 target_symbol_name = _get_symbol_name(target_symbol)
 
 msg = "Door placement started using duplicated type '{}'.".format(target_symbol_name)
-msg += "\nAdjust parameters in the Type Properties / Properties palette, then place the new door."
+msg += "\nType Properties opened. Properties palette toggled (press PP if it closed instead)."
 
 try:
     forms.toast(msg, title="Duplicate Door", appid="pyChilizer")
