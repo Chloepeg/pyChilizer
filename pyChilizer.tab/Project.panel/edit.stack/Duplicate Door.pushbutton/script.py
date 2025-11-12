@@ -3,36 +3,64 @@
 __title__ = 'Duplicate Door'
 __doc__ = 'Duplicates selected door and opens properties dialog'
 
+from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from pyrevit import revit, DB, UI, forms, script
-from pychilizer import select, units
+from pychilizer import units
 
 doc = revit.doc
 uidoc = revit.uidoc
 logger = script.get_logger()
 output = script.get_output()
 
+
+def _is_door(elem):
+    return (
+        isinstance(elem, DB.FamilyInstance)
+        and elem.Category
+        and elem.Category.Id.IntegerValue == int(DB.BuiltInCategory.OST_Doors)
+    )
+
+
+class DoorSelectionFilter(ISelectionFilter):
+    def AllowElement(self, elem):
+        return _is_door(elem)
+
+    def AllowReference(self, reference, point):
+        return True
+
+
+def _get_preselected_door():
+    selected_ids = uidoc.Selection.GetElementIds()
+    if not selected_ids:
+        return None
+    for eid in selected_ids:
+        elem = doc.GetElement(eid)
+        if _is_door(elem):
+            return elem
+    return None
+
+
 # Get door from selection or prompt user
 def get_door():
-    # Check pre-selection first
-    pre_selection = select.preselection_with_filter(DB.BuiltInCategory.OST_Doors)
-    if pre_selection:
+    preselected = _get_preselected_door()
+    if preselected:
         if forms.alert(
-            "You have selected {} door(s). Use the first one?".format(len(pre_selection)),
-            yes=True, no=True
+            "You have selected door(s). Use the first one?",
+            yes=True,
+            no=True
         ):
-            return pre_selection[0]
-    
+            return preselected
+
     # Otherwise prompt for selection
     try:
         with forms.WarningBar(title="Select a door to duplicate"):
             ref = uidoc.Selection.PickObject(
-                UI.Selection.ObjectType.Element,
-                select.CatFilter(DB.BuiltInCategory.OST_Doors),
+                ObjectType.Element,
+                DoorSelectionFilter(),
                 "Select a door to duplicate"
             )
         door = doc.GetElement(ref.ElementId)
-        if isinstance(door, DB.FamilyInstance) and door.Category and \
-           door.Category.Id.IntegerValue == int(DB.BuiltInCategory.OST_Doors):
+        if _is_door(door):
             return door
     except Exception as e:
         logger.debug("Selection cancelled or failed: {}".format(e))
@@ -51,8 +79,6 @@ if units.is_metric(doc):
 else:
     offset_distance = units.convert_length_to_internal(1.0, doc)  # 1 foot
 
-# Get door location to determine offset direction
-door_location = door.Location.Point if door.Location else door.get_BoundingBox(None).Min
 # Use a simple offset in X direction
 offset = DB.XYZ(offset_distance, 0, 0)
 
