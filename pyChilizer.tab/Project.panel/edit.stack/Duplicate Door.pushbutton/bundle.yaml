@@ -1,9 +1,8 @@
 title: Duplicate Door
 tooltip: |
-  Duplicates the selected door and opens properties dialog to edit parameters.
-  
-  Select a door first, then run this command to create a duplicate with the same type and properties.
-  
+  Prepares door placement based on the selected door.
+  Optionally duplicates the door type, opens Properties/Type Properties, and starts interactive placement.
+  Select a door first, then run the command and adjust settings before placing.
   Author: pyChilizer
 
 

@@ -1,16 +1,14 @@
-"""Duplicate Door and Open Properties."""
+"""Prep door placement based on a selected door."""
 
 __title__ = 'Duplicate Door'
-__doc__ = 'Duplicates selected door and opens properties dialog'
+__doc__ = 'Pick a door, duplicate its type, open properties, and start placement.'
 
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from pyrevit import revit, DB, UI, forms, script
-from pychilizer import units
 
 doc = revit.doc
 uidoc = revit.uidoc
 logger = script.get_logger()
-output = script.get_output()
 
 
 DOOR_CATEGORY_ID = DB.ElementId(DB.BuiltInCategory.OST_Doors)
@@ -44,12 +42,64 @@ def _get_preselected_door():
     return None
 
 
+def _get_unique_type_name(base_name, family):
+    existing_names = set()
+    for sid in family.GetFamilySymbolIds():
+        sym = doc.GetElement(sid)
+        if sym:
+            existing_names.add(sym.Name)
+
+    if base_name not in existing_names:
+        return base_name
+
+    counter = 1
+    while True:
+        candidate = "{} ({})".format(base_name, counter)
+        if candidate not in existing_names:
+            return candidate
+        counter += 1
+
+
+def _duplicate_symbol(symbol):
+    default_name = "{} Copy".format(symbol.Name)
+    new_name = forms.ask_for_string(
+        default=_get_unique_type_name(default_name, symbol.Family),
+        prompt="Provide a name for the new door type (Cancel to reuse existing type)."
+    )
+    if not new_name:
+        return symbol, False
+
+    new_name = _get_unique_type_name(new_name, symbol.Family)
+
+    with DB.Transaction(doc, "Duplicate Door Type") as t:
+        t.Start()
+        new_symbol_id = symbol.Duplicate(new_name)
+        new_symbol = doc.GetElement(new_symbol_id)
+        if not new_symbol.IsActive:
+            new_symbol.Activate()
+            doc.Regenerate()
+        t.Commit()
+
+    logger.info("Duplicated door type '{}' to '{}'".format(symbol.Name, new_name))
+    return new_symbol, True
+
+
+def _ensure_symbol_active(symbol):
+    if symbol.IsActive:
+        return
+    with DB.Transaction(doc, "Activate Door Type") as t:
+        t.Start()
+        symbol.Activate()
+        doc.Regenerate()
+        t.Commit()
+
+
 # Get door from selection or prompt user
 def get_door():
     preselected = _get_preselected_door()
     if preselected:
         if forms.alert(
-            "You have selected door(s). Use the first one?",
+            "Use the pre-selected door?",
             yes=True,
             no=True
         ):
@@ -57,11 +107,11 @@ def get_door():
 
     # Otherwise prompt for selection
     try:
-        with forms.WarningBar(title="Select a door to duplicate"):
+        with forms.WarningBar(title="Select a door to base the duplicate on"):
             ref = uidoc.Selection.PickObject(
                 ObjectType.Element,
                 DoorSelectionFilter(),
-                "Select a door to duplicate"
+                "Select a door to base the duplicate on"
             )
         door = doc.GetElement(ref.ElementId)
         if _is_door(door):
@@ -71,64 +121,68 @@ def get_door():
         return None
     return None
 
-# Get the door
+
+# Main flow
 door = get_door()
 if not door:
     forms.alert("No door selected. Please select a door to duplicate.", ok=True, exitscript=True)
 
-# Calculate a small offset to make the duplicate visible
-# Use a small offset in the view's X direction (about 1 foot or 300mm)
-if units.is_metric(doc):
-    offset_distance = units.convert_length_to_internal(0.3, doc)  # 300mm
+source_symbol = door.Symbol
+if not source_symbol:
+    forms.alert("Selected door has no type.", ok=True, exitscript=True)
+
+duplicate_type = forms.alert(
+    "Create a new door type based on '{}' before placement?".format(source_symbol.Name),
+    yes=True,
+    no=True
+)
+
+if duplicate_type:
+    target_symbol, duplicated = _duplicate_symbol(source_symbol)
 else:
-    offset_distance = units.convert_length_to_internal(1.0, doc)  # 1 foot
+    target_symbol = source_symbol
+    duplicated = False
 
-# Use a simple offset in X direction
-offset = DB.XYZ(offset_distance, 0, 0)
+_ensure_symbol_active(target_symbol)
 
-# Duplicate the door
-with revit.Transaction("Duplicate Door"):
+if not target_symbol:
+    forms.alert("Could not prepare door type.", ok=True, exitscript=True)
+
+# Start placement
+try:
+    uidoc.PostRequestForElementTypePlacement(target_symbol)
+except Exception as err:
+    logger.error("Could not start door placement: {}".format(err))
+    forms.alert(
+        "Couldn't start door placement automatically.\n"
+        "Activate the type '{}' manually and place the door.".format(target_symbol.Name),
+        ok=True,
+        exitscript=True
+    )
+
+# Bring Properties / Type Properties forward so user can tweak settings
+prop_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.Properties)
+if prop_cmd:
     try:
-        # Copy the door element
-        new_door_ids = DB.ElementTransformUtils.CopyElement(doc, door.Id, offset)
-        
-        if not new_door_ids or len(new_door_ids) == 0:
-            forms.alert("Failed to duplicate door.", ok=True, exitscript=True)
-        
-        new_door_id = new_door_ids[0]
-        new_door = doc.GetElement(new_door_id)
-        
-        # Select the new door
-        selection = revit.get_selection()
-        selection.set_to([new_door_id])
-        
-        # Refresh the view to show the new door
-        uidoc.RefreshActiveView()
-        
-        # Open properties dialog
-        # Use PostCommand to trigger the Properties command
-        try:
-            prop_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.Properties)
-            if prop_cmd:
-                revit.ui.PostCommand(prop_cmd)
-            else:
-                # Fallback: just inform user
-                forms.alert(
-                    "Door duplicated successfully!\n\n"
-                    "The new door has been selected. Press PP to open the Properties panel.",
-                    ok=True
-                )
-        except Exception as e:
-            logger.warning("Could not open properties dialog automatically: {}".format(e))
-            forms.alert(
-                "Door duplicated successfully!\n\n"
-                "The new door has been selected. Press PP to open the Properties panel.",
-                ok=True
-            )
-        
-        print("Duplicated door: {0}".format(output.linkify(new_door_id)))
-        
-    except Exception as e:
-        logger.error("Error duplicating door: {}".format(e))
-        forms.alert("Error duplicating door:\n{}".format(str(e)), ok=True, exitscript=True)
+        revit.ui.PostCommand(prop_cmd)
+    except Exception as err:
+        logger.debug("Properties command failed: {}".format(err))
+
+type_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.TypeProperties)
+if type_cmd:
+    try:
+        revit.ui.PostCommand(type_cmd)
+    except Exception as err:
+        logger.debug("Type Properties command failed: {}".format(err))
+
+msg = "Door placement started using type '{}'.".format(target_symbol.Name)
+if duplicated:
+    msg += "\nType Properties dialog has been opened so you can adjust parameters before placing."
+else:
+    msg += "\nReuse existing type. Adjust properties as needed before placing."
+
+try:
+    forms.toast(msg, title="Duplicate Door", appid="pyChilizer")
+except Exception:
+    logger.info(msg)
 
