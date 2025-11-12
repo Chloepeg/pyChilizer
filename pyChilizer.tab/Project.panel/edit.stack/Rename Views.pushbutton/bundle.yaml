@@ -1,0 +1,6 @@
+title: Rename Views
+tooltip: |
+  Batch rename views with find/replace support.
+  Opens a grid of view names so you can edit them in bulk.
+  Author: pyChilizer
+
