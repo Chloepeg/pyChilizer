@@ -92,7 +92,10 @@ def _duplicate_symbol(symbol):
     with DB.Transaction(doc, "Duplicate Door Type") as t:
         t.Start()
         new_symbol_id = symbol.Duplicate(new_name)
-        new_symbol = doc.GetElement(new_symbol_id)
+        if isinstance(new_symbol_id, DB.ElementId):
+            new_symbol = doc.GetElement(new_symbol_id)
+        else:
+            new_symbol = new_symbol_id
         if not new_symbol.IsActive:
             new_symbol.Activate()
             doc.Regenerate()
@@ -181,7 +184,7 @@ except Exception as err:
         exitscript=True
     )
 
-# Bring Properties / Type Properties forward so user can tweak settings
+# Bring Properties button forward so user can tweak settings
 prop_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.Properties)
 if prop_cmd:
     try:
@@ -189,20 +192,13 @@ if prop_cmd:
     except Exception as err:
         logger.debug("Properties command failed: {}".format(err))
 
-type_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.TypeProperties)
-if type_cmd:
-    try:
-        revit.ui.PostCommand(type_cmd)
-    except Exception as err:
-        logger.debug("Type Properties command failed: {}".format(err))
-
 target_symbol_name = _get_symbol_name(target_symbol)
 
 msg = "Door placement started using type '{}'.".format(target_symbol_name)
 if duplicated:
-    msg += "\nType Properties dialog has been opened so you can adjust parameters before placing."
+    msg += "\nA new type was created. Adjust properties as needed before placing."
 else:
-    msg += "\nReuse existing type. Adjust properties as needed before placing."
+    msg += "\nReusing existing type. Adjust properties as needed before placing."
 
 try:
     forms.toast(msg, title="Duplicate Door", appid="pyChilizer")
