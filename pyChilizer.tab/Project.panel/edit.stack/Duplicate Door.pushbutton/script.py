@@ -59,6 +59,53 @@ def _get_preselected_door():
     return None
 
 
+def _generate_unique_type_name(base_name, family):
+    existing = set()
+    for sid in family.GetFamilySymbolIds():
+        sym = doc.GetElement(sid)
+        if sym:
+            existing.add(_get_symbol_name(sym))
+
+    if base_name and base_name not in existing:
+        return base_name
+
+    counter = 1
+    base = base_name or "New Door Type"
+    while True:
+        candidate = "{} ({})".format(base, counter)
+        if candidate not in existing:
+            return candidate
+        counter += 1
+
+
+def _duplicate_symbol(symbol):
+    symbol_name = _get_symbol_name(symbol)
+    family = symbol.Family
+    default_name = _generate_unique_type_name("{} Copy".format(symbol_name), family)
+    new_name = forms.ask_for_string(
+        default=default_name,
+        prompt="Provide a name for the new door type (leave blank to use default)."
+    )
+    if not new_name:
+        new_name = default_name
+    new_name = _generate_unique_type_name(new_name, family)
+
+    with DB.Transaction(doc, "Duplicate Door Type") as t:
+        t.Start()
+        duplicated = symbol.Duplicate(new_name)
+        if isinstance(duplicated, DB.ElementId):
+            new_symbol = doc.GetElement(duplicated)
+        else:
+            new_symbol = duplicated
+        if not new_symbol.IsActive:
+            new_symbol.Activate()
+            doc.Regenerate()
+        t.Commit()
+
+    logger.info("Duplicated door type '{}' -> '{}'".format(symbol_name, new_name))
+    return new_symbol
+
+
 def _ensure_symbol_active(symbol):
     if symbol.IsActive:
         return
@@ -107,11 +154,22 @@ source_symbol = doc.GetElement(type_id) if type_id else None
 if not source_symbol:
     forms.alert("Selected door has no type.", ok=True, exitscript=True)
 
-target_symbol = source_symbol
-_ensure_symbol_active(target_symbol)
+try:
+    target_symbol = _duplicate_symbol(source_symbol)
+except Exception as dup_err:
+    logger.error("Failed to duplicate door type: {}".format(dup_err))
+    forms.alert(
+        "Could not duplicate the selected door type.\n"
+        "Details: {}".format(dup_err),
+        ok=True,
+        exitscript=True
+    )
+    target_symbol = None
 
 if not target_symbol:
     forms.alert("Could not prepare door type.", ok=True, exitscript=True)
+
+_ensure_symbol_active(target_symbol)
 
 # Start placement
 try:
@@ -133,10 +191,18 @@ if type_cmd:
     except Exception as err:
         logger.debug("Type Properties command failed: {}".format(err))
 
+# Make sure the Properties palette is shown for instance edits (same as pressing PP)
+prop_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.Properties)
+if prop_cmd:
+    try:
+        revit.ui.PostCommand(prop_cmd)
+    except Exception as err:
+        logger.debug("Properties command failed: {}".format(err))
+
 target_symbol_name = _get_symbol_name(target_symbol)
 
-msg = "Door placement started using type '{}'.".format(target_symbol_name)
-msg += "\nUse the Type Properties dialog to duplicate or adjust parameters, then place the door."
+msg = "Door placement started using duplicated type '{}'.".format(target_symbol_name)
+msg += "\nAdjust parameters in the Type Properties / Properties palette, then place the new door."
 
 try:
     forms.toast(msg, title="Duplicate Door", appid="pyChilizer")
