@@ -106,13 +106,13 @@ def _duplicate_symbol(symbol):
     return new_symbol
 
 
-def _change_door_type(door, new_type):
+def _change_door_type(door, new_symbol):
     """change the door instance to use the new symbol."""
-    with DB.Transaction(doc, "Change Door Type") as t:
+    with DB.Transaction(doc, "Change Door symbol") as t:
         t.Start()
-        door.GetTypeId = new_type
+        door.GetTypeId(new_symbol.Id)
         t.Commit()
-    logger.info("Changed door '{}' to use type '{}'".format(_get_symbol_name(door), _get_symbol_name(new_type)))
+    logger.info("Changed door '{}' to use type '{}'".format(_get_symbol_name(door), _get_symbol_name(new_symbol)))
 
 
 # Get door from selection or prompt user
