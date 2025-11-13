@@ -1,7 +1,6 @@
-title: Duplicate window
+title: Rename views
 tooltip: |
-  Duplicates the selected window's type.
-  Select the window to duplicate and assign it a new name
+  Allows you to quickly rename the views on a sheet 
   Author: Chloe
 
 
