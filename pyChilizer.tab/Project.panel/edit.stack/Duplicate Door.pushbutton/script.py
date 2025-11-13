@@ -110,7 +110,7 @@ def _change_door_type(door, new_symbol):
     """change the door instance to use the new symbol."""
     with DB.Transaction(doc, "Change Door symbol") as t:
         t.Start()
-        door.GetTypeId(new_symbol.Id)
+        door.ChangeTypeId(new_symbol.Id)
         t.Commit()
     logger.info("Changed door '{}' to use type '{}'".format(_get_symbol_name(door), _get_symbol_name(new_symbol)))
 
