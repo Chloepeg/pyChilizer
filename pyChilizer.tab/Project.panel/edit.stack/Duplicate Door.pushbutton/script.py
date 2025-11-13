@@ -106,14 +106,13 @@ def _duplicate_symbol(symbol):
     return new_symbol
 
 
-def _ensure_symbol_active(symbol):
-    if symbol.IsActive:
-        return
-    with DB.Transaction(doc, "Activate Door Type") as t:
+def _change_door_type(door, new_type):
+    """change the door instance to use the new symbol."""
+    with DB.Transaction(doc, "Change Door Type") as t:
         t.Start()
-        symbol.Activate()
-        doc.Regenerate()
+        door.GetTypeId = new_type
         t.Commit()
+    logger.info("Changed door '{}' to use type '{}'".format(_get_symbol_name(door), _get_symbol_name(new_type)))
 
 
 # Get door from selection or prompt user
@@ -129,11 +128,11 @@ def get_door():
 
     # Otherwise prompt for selection
     try:
-        with forms.WarningBar(title="Select a door to base the duplicate on"):
+        with forms.WarningBar(title="Select a door to duplicate and change"):
             ref = uidoc.Selection.PickObject(
                 ObjectType.Element,
                 DoorSelectionFilter(),
-                "Select a door to base the duplicate on"
+                "Select a door to duplicate and change"
             )
         door = doc.GetElement(ref.ElementId)
         if _is_door(door):
@@ -169,19 +168,12 @@ except Exception as dup_err:
 if not target_symbol:
     forms.alert("Could not prepare door type.", ok=True, exitscript=True)
 
-_ensure_symbol_active(target_symbol)
-
-# Start placement
+# Change the existing odoor to the new type
 try:
-    uidoc.PostRequestForElementTypePlacement(target_symbol)
+    _change_door_type(door, target_symbol)
 except Exception as err:
-    logger.error("Could not start door placement: {}".format(err))
-    forms.alert(
-        "Couldn't start door placement automatically.\n"
-        "Activate the type '{}' manually and place the door.".format(_get_symbol_name(target_symbol)),
-        ok=True,
-        exitscript=True
-    )
+    logger.error("Could not change door type: {}".format(err))
+    forms.alert("Could not change door type.", ok=True, exitscript=True)
 
 # Open the standard Revit Type Properties dialog for the active type
 type_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.TypeProperties)
@@ -201,7 +193,7 @@ if toggle_cmd:
 
 target_symbol_name = _get_symbol_name(target_symbol)
 
-msg = "Door placement started using duplicated type '{}'.".format(target_symbol_name)
+msg = "Door changed to duplicated type '{}'.".format(target_symbol_name)
 msg += "\nType Properties opened. Properties palette toggled (press PP if it closed instead)."
 
 try:
