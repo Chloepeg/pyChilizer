@@ -173,7 +173,11 @@ try:
     _change_door_type(door, target_symbol)
 except Exception as err:
     logger.error("Could not change door type: {}".format(err))
-    forms.alert("Could not change door type.", ok=True, exitscript=True)
+    forms.alert("Could not change the door to the new type.\n"
+                "Details: {}".format(err),
+                ok=True,
+                exitscript=True
+    )
 
 # Open the standard Revit Type Properties dialog for the active type
 type_cmd = UI.RevitCommandId.LookupPostableCommandId(UI.PostableCommand.TypeProperties)
