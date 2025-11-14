@@ -133,10 +133,6 @@ else:
     num_missing    = len(missing_mark_rows)
     num_duplicates = len(duplicate_mark_rows)
 
-    msg = "Door QA complete.\n"
-    msg += "- {} door(s) with missing Mark.\n".format(num_missing)
-    msg += "- {} door row(s) with duplicate Mark values.".format(num_duplicates)
-
     forms.alert(msg, ok=True)
 
     logger.info(
