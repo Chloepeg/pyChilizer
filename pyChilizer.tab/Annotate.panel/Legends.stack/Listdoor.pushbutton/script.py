@@ -14,8 +14,13 @@ doors = (DB.FilteredElementCollector(doc)
          .OfCategory(DB.BuiltInCategory.OST_Doors)
          .ToElements())
 
-# Simple alert with count
-forms.alert(
-    "Found {} door(s) in this model.".format(len(doors)),
-    ok=True
-)
+if not doors:
+    forms.alert("No doors found in this model.", ok=True)
+else:
+    rows = [[d.Id, d.Name] for d in doors]
+
+    output.print_md("## Door List (ID / Name)")
+    output.print_table(
+        table_data=rows,
+        columns=["ID", "Name"]
+    )
