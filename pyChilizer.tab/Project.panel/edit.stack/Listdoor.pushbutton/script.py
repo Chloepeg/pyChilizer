@@ -1,111 +1,89 @@
-__title__ = 'Door Tags In View'
-__doc__ = 'Shows which doors in the active view have a tag.'
+__title__ = 'Debug Tags'
+__doc__ = 'Shows all tag-like elements in the active view.'
 
 from pyrevit import revit, DB, script
 
 doc = revit.doc
-uidoc = revit.uidoc
-logger = script.get_logger()
 output = script.get_output()
+logger = script.get_logger()
 
 
-def safe_name(elem, fallback=""):
-    if not elem:
-        return fallback
-    try:
-        return elem.Name
-    except:
-        try:
-            return str(elem.Id)
-        except:
-            return fallback
+def run():
+    view = doc.ActiveView
 
-
-def get_doors_in_view(view):
-    # I collect all door instances visible in this view.
-    doors = (DB.FilteredElementCollector(doc, view.Id)
-             .OfClass(DB.FamilyInstance)
-             .OfCategory(DB.BuiltInCategory.OST_Doors)
-             .WhereElementIsNotElementType()
-             .ToElements())
-    return doors
-
-
-def get_tagged_door_ids_in_view(view, door_ids):
-    # I want to know which of these doors have at least one tag in this view.
-    tagged_door_ids = set()
-
+    # I try to collect all IndependentTag in this view.
     tags = (DB.FilteredElementCollector(doc, view.Id)
-            .OfClass(DB.IndependentTag)
             .WhereElementIsNotElementType()
             .ToElements())
 
-    for tag in tags:
-        ref_ids = set()
+    rows = []
 
-        # First try the newer multi reference method.
+    for el in tags:
+        # I am only interested in annotation like things,
+        # but for now I list everything and filter later.
+        if not isinstance(el, DB.IndependentTag):
+            continue
+
+        tag = el
+
+        tag_id = tag.Id.IntegerValue
+
+        # Class name and category name for this tag
+        class_name = tag.GetType().ToString()
+        cat_name = ""
+        if tag.Category:
+            try:
+                cat_name = tag.Category.Name
+            except:
+                cat_name = ""
+
+        # Try to find what this tag points to
+        referenced = []
+        # Newer style multi reference
         try:
             refs = tag.GetTaggedElementIds()
             for r in refs:
                 eid = r.ElementId
                 if eid and eid != DB.ElementId.InvalidElementId:
-                    ref_ids.add(eid)
+                    elem = doc.GetElement(eid)
+                    rc = elem.Category.Name if elem and elem.Category else ""
+                    referenced.append("{} (cat: {})".format(eid.IntegerValue, rc))
         except:
-            # Older style: single TaggedElementId
+            pass
+
+        # Older style single reference
+        if not referenced:
             try:
                 ref = tag.TaggedElementId
                 if ref and ref.ElementId and ref.ElementId != DB.ElementId.InvalidElementId:
-                    ref_ids.add(ref.ElementId)
+                    elem = doc.GetElement(ref.ElementId)
+                    rc = elem.Category.Name if elem and elem.Category else ""
+                    referenced.append("{} (cat: {})".format(ref.ElementId.IntegerValue, rc))
             except:
                 pass
 
-        for eid in ref_ids:
-            if eid in door_ids:
-                tagged_door_ids.add(eid)
-
-    return tagged_door_ids
-
-
-def run():
-    # I work in the active view only.
-    view = doc.ActiveView
-
-    doors = get_doors_in_view(view)
-    if not doors:
-        output.print_md("No doors found in this view.")
-        return
-
-    door_ids = set(d.Id for d in doors)
-
-    tagged_ids = get_tagged_door_ids_in_view(view, door_ids)
-
-    rows = []
-    for d in doors:
-        did = d.Id
-        id_link = output.linkify(did)
-
-        type_elem = doc.GetElement(d.GetTypeId())
-        type_name = safe_name(type_elem, "No Type")
-
-        level_elem = doc.GetElement(d.LevelId)
-        level_name = safe_name(level_elem, "")
-
-        is_tagged = "Yes" if did in tagged_ids else "No"
+        if not referenced:
+            ref_text = "no referenced elements"
+        else:
+            ref_text = "; ".join(referenced)
 
         rows.append([
-            id_link,
-            type_name,
-            level_name,
-            is_tagged
+            tag_id,
+            class_name,
+            cat_name,
+            ref_text
         ])
 
-    output.print_md("## Door tags in view: " + view.Name)
-    output.print_table(
-        table_data=rows,
-        columns=["Door ID", "Type", "Level", "Tagged in this view?"]
-    )
+    output.print_md("## Tag debug for view: " + view.Name)
+    if rows:
+        output.print_table(
+            table_data=rows,
+            columns=["Tag ID", "Tag class", "Tag category", "References"]
+        )
+    else:
+        output.print_md("No IndependentTag elements found in this view.")
 
-    logger.info("Checked {} doors in view '{}'.".format(len(rows), view.Name))
+    logger.info("Debugged {} tag elements.".format(len(rows)))
 
 
 run()
