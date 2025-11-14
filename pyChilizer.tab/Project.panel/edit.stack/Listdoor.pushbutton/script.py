@@ -1,5 +1,6 @@
 __title__ = 'Door Tag QA'
-__doc__ = 'Checks if doors are tagged in any plan and any elevation view.'
+__doc__ = 'Checks if each door is tagged in any plan and any elevation.'
+
 
 from pyrevit import revit, DB, script
 
@@ -9,7 +10,8 @@ output = script.get_output()
 
 
 def safe_name(elem, fallback=""):
-    # I try to get a clean name for an element.
+    # I want to get a readable name for an element.
+    # If the element has no Name property, I return a fallback string.
     if not elem:
         return fallback
     try:
@@ -22,26 +24,32 @@ def safe_name(elem, fallback=""):
 
 
 def get_views_of_type(vtype):
-    # I collect all non template views of a given type.
-    allviews = DB.FilteredElementCollector(doc).OfClass(DB.View).ToElements()
+    # I get all non-template views of a given type.
+    # For example all floor plans or all elevations.
     views = []
+    allviews = DB.FilteredElementCollector(doc) \
+                 .OfClass(DB.View) \
+                 .ToElements()
     for v in allviews:
-        if not v.IsTemplate and v.ViewType == vtype:
+        if v.IsTemplate:
+            continue
+        if v.ViewType == vtype:
             views.append(v)
     return views
 
 
 def get_doors():
-    # I collect every door instance in the whole model.
-    return (DB.FilteredElementCollector(doc)
-            .OfClass(DB.FamilyInstance)
-            .OfCategory(DB.BuiltInCategory.OST_Doors)
-            .WhereElementIsNotElementType()
-            .ToElements())
+    # I collect all door instances in the whole project.
+    doors = DB.FilteredElementCollector(doc) \
+              .OfClass(DB.FamilyInstance) \
+              .OfCategory(DB.BuiltInCategory.OST_Doors) \
+              .WhereElementIsNotElementType() \
+              .ToElements()
+    return doors
 
 
 def get_mark_value(door):
-    # I try to read the Mark parameter of a door.
+    # I read the Mark parameter on a door (if it exists).
     try:
         p = door.get_Parameter(DB.BuiltInParameter.ALL_MODEL_MARK)
         if p:
@@ -56,95 +64,142 @@ def get_mark_value(door):
     return ""
 
 
+def get_referenced_elements_from_tag(tag):
+    """
+    I try multiple methods to get the elements this tag is attached to.
+    I return a list of Element objects (not ElementId).
+    """
+    elements = []
+
+    # Method 1: GetTaggedLocalElements (some Revit versions have this)
+    try:
+        local_elems = tag.GetTaggedLocalElements()
+        if local_elems:
+            for e in local_elems:
+                # Sometimes this already returns elements.
+                # Sometimes it returns ids. I handle both.
+                try:
+                    if isinstance(e, DB.Element):
+                        elements.append(e)
+                        continue
+                except:
+                    pass
+                try:
+                    if isinstance(e, DB.ElementId):
+                        elem = doc.GetElement(e)
+                        if elem:
+                            elements.append(elem)
+                except:
+                    pass
+            if elements:
+                return elements
+    except:
+        pass
+
+    # Method 2: GetTaggedLocalElementIds (if available)
+    try:
+        local_ids = tag.GetTaggedLocalElementIds()
+        if local_ids:
+            for eid in local_ids:
+                try:
+                    elem = doc.GetElement(eid)
+                    if elem:
+                        elements.append(elem)
+                except:
+                    pass
+            if elements:
+                return elements
+    except:
+        pass
+
+    # Method 3: GetTaggedElementIds (multi reference style)
+    try:
+        ref_ids = []
+        refs = tag.GetTaggedElementIds()
+        if refs:
+            for r in refs:
+                try:
+                    eid = r.ElementId
+                    if eid and eid != DB.ElementId.InvalidElementId:
+                        ref_ids.append(eid)
+                except:
+                    pass
+        for eid in ref_ids:
+            try:
+                elem = doc.GetElement(eid)
+                if elem:
+                    elements.append(elem)
+            except:
+                pass
+        if elements:
+            return elements
+    except:
+        pass
+
+    # Method 4: TaggedElementId (single reference)
+    try:
+        ref = tag.TaggedElementId
+        if ref and ref.ElementId and ref.ElementId != DB.ElementId.InvalidElementId:
+            elem = doc.GetElement(ref.ElementId)
+            if elem:
+                elements.append(elem)
+                return elements
+    except:
+        pass
+
+    # If nothing works, I return an empty list.
+    return elements
+
+
 def get_tagged_door_ids_in_views(views, door_id_set):
     """
-    For a list of views, I return a set of door ids that have at least
-    one tag in any of those views.
-
-    I use tag.GetTaggedLocalElements(), like in the tutorial guy,
-    to get the elements that the tag is attached to.
+    For a list of views, I find which doors are tagged at least once.
+    I return a set of door ids.
     """
     tagged_door_ids = set()
 
     for view in views:
-        # I collect all IndependentTag elements in this view.
-        tags = (DB.FilteredElementCollector(doc, view.Id)
-                .OfClass(DB.IndependentTag)
-                .WhereElementIsNotElementType()
-                .ToElements())
+        # I get all tags in this view.
+        tags = DB.FilteredElementCollector(doc, view.Id) \
+                 .OfClass(DB.IndependentTag) \
+                 .WhereElementIsNotElementType() \
+                 .ToElements()
 
         for tag in tags:
-            tagged_elems = []
+            tagged_elems = get_referenced_elements_from_tag(tag)
 
-            # First, I try GetTaggedLocalElements, which should give me elements.
-            try:
-                elems = tag.GetTaggedLocalElements()
-                if elems:
-                    # In some versions this is an IEnumerable, so I loop it.
-                    for e in elems:
-                        tagged_elems.append(e)
-            except:
-                tagged_elems = []
-
-            # As a fallback, if that did not work, I try the id based methods.
-            if not tagged_elems:
-                ref_ids = set()
-                # Newer style multi reference
-                try:
-                    refs = tag.GetTaggedElementIds()
-                    for r in refs:
-                        eid = r.ElementId
-                        if eid and eid != DB.ElementId.InvalidElementId:
-                            ref_ids.add(eid)
-                except:
-                    pass
-                # Older style single reference
-                if not ref_ids:
-                    try:
-                        ref = tag.TaggedElementId
-                        if ref and ref.ElementId and ref.ElementId != DB.ElementId.InvalidElementId:
-                            ref_ids.add(ref.ElementId)
-                    except:
-                        pass
-
-                for eid in ref_ids:
-                    elem = doc.GetElement(eid)
-                    if elem:
-                        tagged_elems.append(elem)
-
-            # Now I have a list of elements that this tag points to.
-            # I only care if they are doors that are in my door_id_set.
             for elem in tagged_elems:
-                if not isinstance(elem, DB.FamilyInstance):
+                # I only care about elements whose id is in my door set.
+                try:
+                    elem_id = elem.Id
+                except:
                     continue
-                cat = elem.Category
-                if not cat:
-                    continue
-                # I check that the element is a door and in my door set.
-                if cat.Id.IntegerValue == int(DB.BuiltInCategory.OST_Doors):
-                    if elem.Id in door_id_set:
-                        tagged_door_ids.add(elem.Id)
+
+                if elem_id in door_id_set:
+                    tagged_door_ids.add(elem_id)
 
     return tagged_door_ids
 
 
 def run():
-    # This is the main function that runs when I click the button.
+    # Main entry point when I click the pyRevit button.
 
     doors = get_doors()
     if not doors:
         output.print_md("No doors found in the model.")
         return
 
-    # I store all door ids in a set so it is cheap to check membership.
+    # I store all door ids in a set so I can test membership quickly.
     door_ids = set(d.Id for d in doors)
 
-    # I collect all plan views and all elevation views.
+    # I get all floor plans and all elevations.
     plan_views = get_views_of_type(DB.ViewType.FloorPlan)
     elev_views = get_views_of_type(DB.ViewType.Elevation)
 
-    # Now I find which doors are tagged in any plan, and in any elevation.
+    # For plans: which doors have at least one tag in any plan view.
     doors_tagged_in_plans = get_tagged_door_ids_in_views(plan_views, door_ids)
+
+    # For elevations: which doors have at least one tag in any elevation view.
     doors_tagged_in_elevs = get_tagged_door_ids_in_views(elev_views, door_ids)
 
     all_rows = []
@@ -168,8 +223,8 @@ def run():
         plan_text = "Yes" if plan_tagged else "No"
         elev_text = "Yes" if elev_tagged else "No"
 
-        # I call it consistent only if both sides match:
-        # both Yes or both No.
+        # If both sides match (both tagged or both not tagged), I say OK.
+        # If one is tagged and the other is not, I say Inconsistent.
         if plan_tagged == elev_tagged:
             status = "OK"
         else:
@@ -186,11 +241,10 @@ def run():
         ]
 
         all_rows.append(row)
-
         if status == "Inconsistent":
             inconsistent_rows.append(row)
 
-    # I print my results.
+    # I print the results in the pyRevit output window.
     output.print_md("## Door tag presence in plans and elevations")
 
     output.print_md("### Doors with inconsistent tagging")
@@ -202,7 +256,7 @@ def run():
     else:
         output.print_md("No inconsistencies found.")
 
-    output.print_md("### All doors")
+    output.print_md("### All doors summary")
     output.print_table(
         table_data=all_rows,
         columns=["Door Id", "Type", "Level", "Mark", "Tagged in plans", "Tagged in elevations", "Status"]
