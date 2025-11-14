@@ -1,25 +1,11 @@
 __title__ = 'Door Tag QA'
-# This is what pyRevit shows as the button name.
-
-__doc__   = 'Automatically compares tags in all plan and elevation views.'
-# This is the tooltip description when you hover over the button.
-
+__doc__ = 'check door tags for inconsistencies between views.'
 
 from pyrevit import revit, DB, script
-# We import the tools we need:
-# - revit → gives us quick access to the active document (doc)
-# - DB → gives us all Revit API classes (doors, views, tags, etc.)
-# - script → gives us logging + output window features
 
-
-doc    = revit.doc
-# "doc" is the actual Revit model: walls, doors, views, everything.
-
+doc = revit.doc
 logger = script.get_logger()
-# Lets us print debugging messages to pyRevit’s console.
-
 output = script.get_output()
-# Lets us print tables and clickable links inside the output window.
 
 
 def safe_name(elem, fallback=""):
