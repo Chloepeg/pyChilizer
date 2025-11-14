@@ -3,13 +3,13 @@ __doc__   = 'Check doors for missing or duplicate Mark values and show a summary
 
 from pyrevit import revit, DB, forms, script
 
-# Environment setup
+# environment setup
 doc    = revit.doc
 uidoc  = revit.uidoc
 logger = script.get_logger()
 output = script.get_output()
 
-# Collect all door instances in the model
+# Collect all doors in the model
 doors = (DB.FilteredElementCollector(doc)
          .OfClass(DB.FamilyInstance)
          .OfCategory(DB.BuiltInCategory.OST_Doors)
@@ -29,15 +29,24 @@ else:
         # Clickable ID in pyRevit output
         id_link = output.linkify(d.Id)
 
-        # Type name
+        # Type name, some elements do not have name)
         type_elem = doc.GetElement(d.GetTypeId())
-        type_name = type_elem.Name if type_elem else "<No Type>"
+        type_name = "<No Type>"
+        if type_elem:
+            try:
+                type_name = type_elem.Name
+            except AttributeError:
+                type_name = str(type_elem.Id)
 
-        # Level name (may be empty for some elements)
+        # Level name (may be empty or level may not have Name)
         level_name = ""
         try:
             level = doc.GetElement(d.LevelId)
-            level_name = level.Name if level else ""
+            if level:
+                try:
+                    level_name = level.Name
+                except AttributeError:
+                    level_name = str(level.Id)
         except Exception:
             level_name = ""
 
@@ -45,7 +54,10 @@ else:
         mark_param = d.get_Parameter(DB.BuiltInParameter.ALL_MODEL_MARK)
         mark_val = ""
         if mark_param:
-            mark_val = mark_param.AsString() or mark_param.AsValueString() or ""
+            try:
+                mark_val = mark_param.AsString() or mark_param.AsValueString() or ""
+            except Exception:
+                mark_val = ""
 
         info = {
             "id_link": id_link,
