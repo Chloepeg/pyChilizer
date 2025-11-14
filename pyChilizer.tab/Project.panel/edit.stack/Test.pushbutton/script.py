@@ -1,4 +1,4 @@
-
+# -*- coding: ascii -*-
 #  TEMPLATE: Revit API Exploration Button
 
 #  This template shows :
@@ -11,10 +11,8 @@
 #   Output formatting + logging
 #   Multiple examples kept but disabled for switching ON/OFF
 
-
 __title__ = 'Test'
-__doc__   = 'Trying different things & showing API basics'
-
+__doc__   = 'Trying different things and showing API basics'
 
 # ALWAYS IMPORT LIBRARIES
 
@@ -28,8 +26,7 @@ uidoc = revit.uidoc    # Only needed for user selection / UI
 logger = script.get_logger()  # For console logging (great for debugging)
 output = script.get_output()  # Lets you format tables, link elements, etc.
 
-
-#  HOW TO GET ELEMENTS IN REVIT (MOST IMPORTANT PATTERN)
+# HOW TO GET ELEMENTS IN REVIT (MOST IMPORTANT PATTERN)
 
 #   DB.FilteredElementCollector(doc)
 #       .OfClass(DB.SomeClass)           # Filter by TYPE
@@ -41,9 +38,7 @@ output = script.get_output()  # Lets you format tables, link elements, etc.
 # elements = DB.FilteredElementCollector(doc).OfClass(DB.Wall).ToElements()
 # elements = DB.FilteredElementCollector(doc).OfClass(DB.FamilyInstance).OfCategory(DB.BuiltInCategory.OST_Doors).ToElements()
 
-
 # USER CHOOSES WHAT TO TEST (SWITCH BETWEEN FEATURES)
-
 
 action = forms.CommandSwitchWindow.show(
     {
@@ -60,8 +55,7 @@ if not action:
     forms.alert("Cancelled")
     script.exit()
 
-
-#  ACTION 1: LIST ALL WALLS
+# ACTION 1: LIST ALL WALLS
 if action == "List Walls":
 
     walls = DB.FilteredElementCollector(doc).OfClass(DB.Wall).ToElements()
@@ -73,8 +67,7 @@ if action == "List Walls":
     )
     logger.info("Found {} walls".format(len(walls)))
 
-
-#  ACTION 2: LIST ALL DOORS
+# ACTION 2: LIST ALL DOORS
 elif action == "List Doors":
 
     doors = (DB.FilteredElementCollector(doc)
@@ -82,16 +75,15 @@ elif action == "List Doors":
              .OfCategory(DB.BuiltInCategory.OST_Doors)
              .ToElements())
 
-    output.print_md("## 🚪 List of Doors")
+    output.print_md("## List of Doors")
     output.print_table(
         table_data=[[d.Id, d.Name] for d in doors],
         columns=["ID", "Door Name"]
     )
     logger.info("Found {} doors".format(len(doors)))
 
-
-#  ACTION 3: MODIFY SELECTED ELEMENTS
-#  Move selected elements by (5 meter, 0, 0)
+# ACTION 3: MODIFY SELECTED ELEMENTS
+# Move selected elements by (5 meter, 0, 0)
 
 elif action == "Modify Elements":
 
@@ -112,8 +104,7 @@ elif action == "Modify Elements":
 
     forms.alert("{} elements moved 5 feet.".format(len(elements)))
 
-
-#  ACTION 4: CREATE A TEST WALL
+# ACTION 4: CREATE A TEST WALL
 
 elif action == "Create Wall":
 
@@ -136,10 +127,7 @@ elif action == "Create Wall":
     output.linkify(wall.Id)
     logger.info("Wall created.")
 
-
-# ============================================================
-#  ACTION 5: REPORT PARAMETERS
-# ============================================================
+# ACTION 5: REPORT PARAMETERS
 
 elif action == "Parameter Report":
 
@@ -151,16 +139,16 @@ elif action == "Parameter Report":
 
     element = doc.GetElement(selection[0])
 
-    output.print_md(f"##  Parameter Report for: `{element.Name}` (ID {element.Id})")
+    output.print_md("## Parameter Report for: {} (ID {})".format(element.Name, element.Id))
 
     params = element.Parameters
 
     rows = []
     for p in params:
         try:
-            val = p.AsValueString() or p.AsString() or "—"
+            val = p.AsValueString() or p.AsString() or "-"
         except:
-            val = "—"
+            val = "-"
         rows.append([p.Definition.Name, val])
 
     output.print_table(rows, columns=["Parameter", "Value"])
