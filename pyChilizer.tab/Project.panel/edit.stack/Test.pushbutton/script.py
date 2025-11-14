@@ -44,7 +44,7 @@ action = forms.CommandSwitchWindow.show(
     {
         "List Walls": "List all walls in model",
         "List Doors": "List all doors in model",
-        "Modify Elements": "Move selected elements by 5 feet",
+        "Modify Elements": "Move selected elements by 5 meter",
         "Create Wall": "Create a simple test wall",
         "Parameter Report": "Show parameters for selected element"
     },
@@ -102,7 +102,7 @@ elif action == "Modify Elements":
         for element in elements:
             DB.ElementTransformUtils.MoveElement(doc, element.Id, move_vector)
 
-    forms.alert("{} elements moved 5 feet.".format(len(elements)))
+    forms.alert("{} elements moved 5 meter.".format(len(elements)))
 
 # ACTION 4: CREATE A TEST WALL
 
