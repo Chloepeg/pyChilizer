@@ -1,16 +1,26 @@
 __title__ = 'Door Tag QA'
-__doc__ = 'check door tags for inconsistencies between views.'
+
+__doc__ = 'Compares door tags in plan views and elevation views.'
 
 from pyrevit import revit, DB, script
+# I import only what I need:
+# revit gives me access to the model.
+# DB gives me the Revit API classes.
+# script lets me print tables and logs.
 
 doc = revit.doc
+# This is the active Revit document.
+
 logger = script.get_logger()
+# I use this if I want to print messages in the pyRevit console.
+
 output = script.get_output()
+# This lets me print tables in the output window.
 
 
 def safe_name(elem, fallback=""):
-    # This helper function safely gets the element’s Name.
-    # Beginners hit errors when an element doesn't have .Name, so we protect against that.
+    # Some Revit elements do not have a Name property.
+    # Instead of letting the script crash, I return a fallback string.
     if not elem:
         return fallback
     try:
@@ -23,40 +33,34 @@ def safe_name(elem, fallback=""):
 
 
 def get_views_of_type(vtype):
-    # This gets ALL views of a specific ViewType (e.g. all plans or all elevations)
-    # The filter goes through the entire model and picks views matching the desired type.
-    return [
-        v for v in DB.FilteredElementCollector(doc)
-        .OfClass(DB.View)
-        if not v.IsTemplate and v.ViewType == vtype
-        # We skip view templates because they’re not real views you can tag things in.
-    ]
+    # I want all views of a specific type, for example all floor plans.
+    # I also skip templates because those do not contain tags.
+    allviews = DB.FilteredElementCollector(doc).OfClass(DB.View).ToElements()
+    views = []
+    for v in allviews:
+        if not v.IsTemplate and v.ViewType == vtype:
+            views.append(v)
+    return views
 
 
 def get_doors():
-    # This collects every door instance in the whole model.
-    # FamilyInstance + category = doors → gives us only real placed doors, not types.
-    return (
-        DB.FilteredElementCollector(doc)
-        .OfClass(DB.FamilyInstance)
-        .OfCategory(DB.BuiltInCategory.OST_Doors)
-        .WhereElementIsNotElementType()
-        .ToElements()
-    )
+    # This collects every placed door instance in the model.
+    return (DB.FilteredElementCollector(doc)
+            .OfClass(DB.FamilyInstance)
+            .OfCategory(DB.BuiltInCategory.OST_Doors)
+            .WhereElementIsNotElementType()
+            .ToElements())
 
 
 def get_tags_in_view(view):
-    # This collects all tag annotations inside ONE specific view.
-    # Revit stores tags as IndependentTag elements.
-    tags = (
-        DB.FilteredElementCollector(doc, view.Id)
-        .OfClass(DB.IndependentTag)
-        .WhereElementIsNotElementType()
-        .ToElements()
-    )
+    # This collects all annotation tags placed inside one specific view.
+    # I only want door tags or multi category tags.
+    tags = (DB.FilteredElementCollector(doc, view.Id)
+            .OfClass(DB.IndependentTag)
+            .WhereElementIsNotElementType()
+            .ToElements())
 
-    # We only want tags that CAN represent doors (Door Tags or Multi-category Tags)
-    doorlike = []
+    result = []
     for t in tags:
         cat = t.Category
         if not cat:
@@ -65,32 +69,26 @@ def get_tags_in_view(view):
             bic = DB.BuiltInCategory(cat.Id.IntegerValue)
         except:
             continue
-
-        if bic in (
-            DB.BuiltInCategory.OST_DoorTags,
-            DB.BuiltInCategory.OST_MultiCategoryTags
-        ):
-            doorlike.append(t)
-    return doorlike
+        if bic == DB.BuiltInCategory.OST_DoorTags or bic == DB.BuiltInCategory.OST_MultiCategoryTags:
+            result.append(t)
+    return result
 
 
 def map_tags_to_doors(views):
-    # This is where things get interesting.
-    # Our goal is to map EACH DOOR → ITS TAG TEXT(S) in all views provided.
-
-    tag_map = {}   # dictionary: door_id → list of tag text strings
+    # I need to know which door each tag belongs to.
+    # So I build a dictionary that stores:
+    # door_id : list of tag texts found in the given views.
+    tag_map = {}
 
     for view in views:
-        # For each view, grab the tags inside it
         tags = get_tags_in_view(view)
 
         for tag in tags:
-
-            # Step 1: figure out WHICH ELEMENT the tag points to.
             tagged_ids = set()
+
+            # I try to get the element ids this tag points to.
             try:
                 refs = tag.GetTaggedElementIds()
-                # A tag can sometimes reference more than one element (multi-tags)
                 for r in refs:
                     eid = r.ElementId
                     if eid and eid != DB.ElementId.InvalidElementId:
@@ -98,13 +96,13 @@ def map_tags_to_doors(views):
             except:
                 pass
 
-            # Step 2: read the actual text shown on the tag (TagText)
+            # I get the printed text of the tag.
             try:
                 text = tag.TagText or ""
             except:
                 text = ""
 
-            # Step 3: connect this tag text to the door(s) it points to
+            # I store the text under each door id.
             for eid in tagged_ids:
                 if eid not in tag_map:
                     tag_map[eid] = []
@@ -115,54 +113,51 @@ def map_tags_to_doors(views):
 
 
 def run():
-    # Main function — this runs when the button is clicked.
+    # This is the main function that will run when I click the pyRevit button.
 
     doors = get_doors()
-    # First, grab all doors in the whole model.
+    # I collect all doors in the model.
 
     plan_views = get_views_of_type(DB.ViewType.FloorPlan)
-    # All plan views (every single one).
+    # All plan views.
 
     elev_views = get_views_of_type(DB.ViewType.Elevation)
     # All elevation views.
 
-    # For each view type, build:
-    #   door_id → list of tag text
-    plan_tag_map = map_tags_to_doors(plan_views)
-    elev_tag_map = map_tags_to_doors(elev_views)
+    plan_tags = map_tags_to_doors(plan_views)
+    elev_tags = map_tags_to_doors(elev_views)
+    # These tell me what tags each door has in plans and elevation views.
 
-    all_rows = []         # This will hold ALL the doors
-    inconsistent_rows = []  # Only doors where plan/elev tag doesnt match
+    all_rows = []
+    inconsistent_rows = []
 
     for d in doors:
         eid = d.Id
         id_link = output.linkify(eid)
-        # Makes the ID clickable in the output window.
+        # This makes the ID clickable in the output window.
 
         type_elem = doc.GetElement(d.GetTypeId())
-        type_name = safe_name(type_elem, "<No Type>")
-        # Clean type name.
+        type_name = safe_name(type_elem, "No Type")
 
-        level = doc.GetElement(d.LevelId)
-        level_name = safe_name(level, "")
-        # Clean level name.
+        level_elem = doc.GetElement(d.LevelId)
+        level_name = safe_name(level_elem, "")
 
-        # Tag text from any plan view
-        plan_tags = plan_tag_map.get(eid, [])
-        plan_text = ", ".join(plan_tags) if plan_tags else ""
+        # I gather tag texts from plans.
+        p_tags = plan_tags.get(eid, [])
+        p_text = ", ".join(p_tags) if p_tags else ""
 
-        # Tag text from any elevation
-        elev_tags = elev_tag_map.get(eid, [])
-        elev_text = ", ".join(elev_tags) if elev_tags else ""
+        # I gather tag texts from elevations.
+        e_tags = elev_tags.get(eid, [])
+        e_text = ", ".join(e_tags) if e_tags else ""
 
-        # Consistency logic:
-        # Case A: no tags anywhere → OK
-        # Case B: tags in both → OK if same, else inconsistent Even possible ? 
-        # Case C: only tagged in one → inconsistent
-        if not plan_text and not elev_text:
+        # I check if the tagging is consistent across plan and elevation.
+        if not p_text and not e_text:
             status = "OK"
-        elif plan_text and elev_text:
-            status = "OK" if plan_text == elev_text else "Inconsistent"
+        elif p_text and e_text:
+            if p_text == e_text:
+                status = "OK"
+            else:
+                status = "Inconsistent"
         else:
             status = "Inconsistent"
 
@@ -170,38 +165,36 @@ def run():
             id_link,
             type_name,
             level_name,
-            plan_text or "No tag",
-            elev_text or "No tag",
+            p_text if p_text else "No tag",
+            e_text if e_text else "No tag",
             status
         ]
 
         all_rows.append(row)
+
         if status == "Inconsistent":
             inconsistent_rows.append(row)
 
-    # Now we print the results to the pyRevit output panel
+    # Now I print the results.
 
-    output.print_md("## Door Tag Consistency (All Plans vs All Elevations)")
+    output.print_md("## Door Tag Consistency")
 
-    output.print_md("### Inconsistent Doors Only")
+    output.print_md("### Doors with inconsistent tagging")
     if inconsistent_rows:
         output.print_table(
             table_data=inconsistent_rows,
-            columns=["ID", "Type", "Level", "Plan Tag", "Elevation Tag", "Status"]
+            columns=["ID", "Type", "Level", "Tag in Plans", "Tag in Elevations", "Status"]
         )
     else:
         output.print_md("No inconsistencies found.")
 
-    output.print_md("### Full Door Tag Summary")
+    output.print_md("### All doors summary")
     output.print_table(
         table_data=all_rows,
-        columns=["ID", "Type", "Level", "Plan Tag", "Elevation Tag", "Status"]
+        columns=["ID", "Type", "Level", "Tag in Plans", "Tag in Elevations", "Status"]
     )
 
-    logger.info(
-        "Door Tag QA complete. {} doors checked, {} inconsistent."
-        .format(len(all_rows), len(inconsistent_rows))
-    )
+    logger.info("Finished checking door tags. Count: " + str(len(all_rows)))
 
 
 run()
