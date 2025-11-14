@@ -20,14 +20,11 @@ else:
     rows = []
 
     for d in doors:
-        # Clickable ID link
         id_link = output.linkify(d.Id)
 
-        # Type name
         type_elem = doc.GetElement(d.GetTypeId())
         type_name = type_elem.Name if type_elem else "<No Type>"
 
-        # Level name (may be empty for some elements)
         level_name = ""
         try:
             level = doc.GetElement(d.LevelId)
@@ -35,10 +32,16 @@ else:
         except Exception:
             level_name = ""
 
-        rows.append([id_link, type_name, level_name])
+        # Mark parameter (tag value)
+        mark_param = d.get_Parameter(DB.BuiltInParameter.ALL_MODEL_MARK)
+        mark_val = ""
+        if mark_param:
+            mark_val = mark_param.AsString() or mark_param.AsValueString() or ""
 
-    output.print_md("## Doors (ID / Type / Level)")
+        rows.append([id_link, type_name, level_name, mark_val])
+
+    output.print_md("## Doors (ID / Type / Level / Mark)")
     output.print_table(
         table_data=rows,
-        columns=["ID", "Type", "Level"]
+        columns=["ID", "Type", "Level", "Mark"]
     )
