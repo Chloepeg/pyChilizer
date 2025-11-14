@@ -17,7 +17,8 @@ doors = (DB.FilteredElementCollector(doc)
 if not doors:
     forms.alert("No doors found in this model.", ok=True)
 else:
-    rows = []
+    all_rows = []
+    missing_mark_rows = []
 
     for d in doors:
         id_link = output.linkify(d.Id)
@@ -32,16 +33,30 @@ else:
         except Exception:
             level_name = ""
 
-        # Mark parameter (tag value)
         mark_param = d.get_Parameter(DB.BuiltInParameter.ALL_MODEL_MARK)
         mark_val = ""
         if mark_param:
             mark_val = mark_param.AsString() or mark_param.AsValueString() or ""
 
-        rows.append([id_link, type_name, level_name, mark_val])
+        all_rows.append([id_link, type_name, level_name, mark_val])
 
-    output.print_md("## Doors (ID / Type / Level / Mark)")
+        # Missing Mark if empty or just spaces
+        if not mark_val.strip():
+            missing_mark_rows.append([id_link, type_name, level_name, "(blank)"])
+
+    # Doors with missing Mark
+    output.print_md("## Doors with missing Mark")
+    if missing_mark_rows:
+        output.print_table(
+            table_data=missing_mark_rows,
+            columns=["ID", "Type", "Level", "Mark"]
+        )
+    else:
+        output.print_md("✅ No doors with missing Mark.")
+
+    # All doors summary
+    output.print_md("## All Doors (summary)")
     output.print_table(
-        table_data=rows,
+        table_data=all_rows,
         columns=["ID", "Type", "Level", "Mark"]
     )
