@@ -1,24 +1,16 @@
 __title__ = 'Door Tag QA'
-# This is what I see on the pyRevit button.
 
-__doc__ = 'Checks tag consistency for all plan and elevation views.'
-# This shows up in the tooltip.
+__doc__ = 'Checks if doors are tagged in plans and elevations.'
 
 from pyrevit import revit, DB, script
 
 doc = revit.doc
-# This is the active Revit document.
-
 logger = script.get_logger()
-# I use this to print messages to the console.
-
 output = script.get_output()
-# This lets me print tables in the output panel.
 
 
 def safe_name(elem, fallback=""):
-    # Some elements do not have a Name property.
-    # I return a fallback string instead of crashing.
+    # I want to get elem.Name but avoid crashes if it does not exist.
     if not elem:
         return fallback
     try:
@@ -31,8 +23,7 @@ def safe_name(elem, fallback=""):
 
 
 def get_views_of_type(vtype):
-    # I get all views of a specific type.
-    # I skip template views because they do not contain tags.
+    # I collect all views of a given type and ignore templates.
     allviews = DB.FilteredElementCollector(doc).OfClass(DB.View).ToElements()
     views = []
     for v in allviews:
@@ -42,7 +33,7 @@ def get_views_of_type(vtype):
 
 
 def get_doors():
-    # I collect every placed door instance in the entire model.
+    # I collect every door instance in the model.
     return (DB.FilteredElementCollector(doc)
             .OfClass(DB.FamilyInstance)
             .OfCategory(DB.BuiltInCategory.OST_Doors)
@@ -50,92 +41,83 @@ def get_doors():
             .ToElements())
 
 
-def extract_tag_text(tag):
-    # I try to get the text printed on the tag.
-    # Some tags store text in TagText.
-    try:
-        t = tag.TagText
-        if t:
-            return t
-    except:
-        pass
-
-    # If TagText is empty, I check if the tag has formatted text.
-    try:
-        fmt = tag.GetFormattedText()
-        if fmt:
-            return fmt
-    except:
-        pass
-
-    # If everything fails, return empty.
-    return ""
-
-
-def get_door_tag_map(views):
-    # This builds a dictionary that maps:
-    # door id : list of tag texts found in the given views.
-
-    tag_map = {}
+def get_tagged_door_ids_in_views(views, door_id_set):
+    # For a list of views, I want to know which doors are tagged at least once.
+    tagged_door_ids = set()
 
     for view in views:
-        # I collect every IndependentTag in this view.
-        tags = DB.FilteredElementCollector(doc, view.Id) \
-                    .OfClass(DB.IndependentTag) \
-                    .WhereElementIsNotElementType() \
-                    .ToElements()
+        # I get all IndependentTag elements in this view.
+        tags = (DB.FilteredElementCollector(doc, view.Id)
+                .OfClass(DB.IndependentTag)
+                .WhereElementIsNotElementType()
+                .ToElements())
 
         for tag in tags:
-            # First, I get the element ids this tag references.
-            door_ids = set()
+            # I try to get all element ids that this tag references.
+            ref_ids = set()
+
             try:
                 refs = tag.GetTaggedElementIds()
                 for r in refs:
                     eid = r.ElementId
                     if eid and eid != DB.ElementId.InvalidElementId:
-                        # Check if the referenced element is a door.
-                        elem = doc.GetElement(eid)
-                        if isinstance(elem, DB.FamilyInstance):
-                            cat = elem.Category
-                            if cat and cat.Id.IntegerValue == DB.BuiltInCategory.OST_Doors:
-                                door_ids.add(eid)
+                        ref_ids.add(eid)
             except:
-                pass
+                # Some older tags use a single TaggedElementId property.
+                try:
+                    ref = tag.TaggedElementId
+                    if ref and ref.ElementId and ref.ElementId != DB.ElementId.InvalidElementId:
+                        ref_ids.add(ref.ElementId)
+                except:
+                    pass
 
-            # If this tag does not reference any door, skip it.
-            if not door_ids:
-                continue
+            # I only care if the referenced element is a door.
+            for eid in ref_ids:
+                if eid in door_id_set:
+                    tagged_door_ids.add(eid)
 
-            # I extract the printed text from the tag.
-            text = extract_tag_text(tag)
+    return tagged_door_ids
 
-            # I store this tag text for each referenced door.
-            for did in door_ids:
-                if did not in tag_map:
-                    tag_map[did] = []
-                if text and text not in tag_map[did]:
-                    tag_map[did].append(text)
 
-    return tag_map
+def get_mark_value(door):
+    # I try to read the Mark parameter, since this is usually what the tag shows.
+    try:
+        p = door.get_Parameter(DB.BuiltInParameter.ALL_MODEL_MARK)
+        if p:
+            s = p.AsString()
+            if s:
+                return s
+            s2 = p.AsValueString()
+            if s2:
+                return s2
+    except:
+        pass
+    return ""
 
 
 def run():
-    # This runs when I click the button.
+    # This is what runs when I click the button.
 
     doors = get_doors()
+    if not doors:
+        output.print_md("No doors found in the model.")
+        return
 
-    # I get all plan views.
+    # I build a set of all door ids to check against tags.
+    door_ids = set(d.Id for d in doors)
+
+    # I get all plan views and all elevation views.
     plan_views = get_views_of_type(DB.ViewType.FloorPlan)
-
-    # I get all elevation views.
     elev_views = get_views_of_type(DB.ViewType.Elevation)
 
-    # I map tags in plans and elevations.
-    plan_tags = get_door_tag_map(plan_views)
-    elev_tags = get_door_tag_map(elev_views)
+    # For plans: which doors have at least one tag.
+    doors_tagged_in_plans = get_tagged_door_ids_in_views(plan_views, door_ids)
+
+    # For elevations: which doors have at least one tag.
+    doors_tagged_in_elevs = get_tagged_door_ids_in_views(elev_views, door_ids)
 
     all_rows = []
-    inconsistent = []
+    inconsistent_rows = []
 
     for door in doors:
         did = door.Id
@@ -147,18 +129,17 @@ def run():
         level_elem = doc.GetElement(door.LevelId)
         level_name = safe_name(level_elem, "")
 
-        # Get tag text found in all plan views.
-        p_list = plan_tags.get(did, [])
-        p_text = ", ".join(p_list) if p_list else ""
+        mark_val = get_mark_value(door)
 
-        # Get tag text found in all elevation views.
-        e_list = elev_tags.get(did, [])
-        e_text = ", ".join(e_list) if e_list else ""
+        plan_tagged = did in doors_tagged_in_plans
+        elev_tagged = did in doors_tagged_in_elevs
 
-        # Determine if tags are consistent.
-        if not p_text and not e_text:
-            status = "OK"
-        elif p_text and e_text and p_text == e_text:
+        plan_text = "Yes" if plan_tagged else "No"
+        elev_text = "Yes" if elev_tagged else "No"
+
+        # I consider it consistent only if both plan and elevation have the same state:
+        # both tagged, or both untagged.
+        if plan_tagged == elev_tagged:
             status = "OK"
         else:
             status = "Inconsistent"
@@ -167,35 +148,36 @@ def run():
             id_link,
             type_name,
             level_name,
-            p_text if p_text else "No tag",
-            e_text if e_text else "No tag",
+            mark_val if mark_val else "",
+            plan_text,
+            elev_text,
             status
         ]
 
         all_rows.append(row)
 
         if status == "Inconsistent":
-            inconsistent.append(row)
+            inconsistent_rows.append(row)
 
-    # Print results.
-    output.print_md("## Door Tag Consistency Across All Plans and Elevations")
+    # I print the results.
+    output.print_md("## Door Tag Presence, Plans vs Elevations")
 
-    output.print_md("### Inconsistent Doors")
-    if inconsistent:
+    output.print_md("### Doors with inconsistent tagging")
+    if inconsistent_rows:
         output.print_table(
-            table_data=inconsistent,
-            columns=["ID", "Type", "Level", "Plan Tag", "Elevation Tag", "Status"]
+            table_data=inconsistent_rows,
+            columns=["ID", "Type", "Level", "Mark", "Tagged in Plans", "Tagged in Elevations", "Status"]
         )
     else:
         output.print_md("No inconsistencies found.")
 
-    output.print_md("### All Doors")
+    output.print_md("### All doors")
     output.print_table(
         table_data=all_rows,
-        columns=["ID", "Type", "Level", "Plan Tag", "Elevation Tag", "Status"]
+        columns=["ID", "Type", "Level", "Mark", "Tagged in Plans", "Tagged in Elevations", "Status"]
     )
 
-    logger.info("Finished checking door tags.")
+    logger.info("Finished checking door tag presence for {} doors.".format(len(all_rows)))
 
 
 run()
