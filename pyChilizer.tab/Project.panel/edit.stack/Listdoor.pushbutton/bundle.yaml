@@ -1,6 +1,6 @@
-title: List door tag
+title: Door Tag Checker
 tooltip: |
-  List door tag and identify duplicate or missing tag in your project
+  Analyse if doors are tagged in views and check for inconsistencies.
   Author: Chloe
 
 

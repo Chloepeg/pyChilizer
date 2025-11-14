@@ -1,5 +1,5 @@
-__title__ = 'Door Tag QA'
-__doc__ = 'Checks if each door is tagged in any plan and any elevation.'
+__title__ = 'Door Tag Checker'
+__doc__ = 'Analyse if doors are tagged in views and check for inconsistencies.'
 
 
 from pyrevit import revit, DB, script
@@ -66,18 +66,18 @@ def get_mark_value(door):
 
 def get_referenced_elements_from_tag(tag):
     """
-    I try multiple methods to get the elements this tag is attached to.
+    I try multiple methods to get the elements this tag is attached to. (Not sure everything is necessary)
     I return a list of Element objects (not ElementId).
     """
     elements = []
 
-    # Method 1: GetTaggedLocalElements (some Revit versions have this)
+    # GetTaggedLocalElements 
     try:
         local_elems = tag.GetTaggedLocalElements()
         if local_elems:
             for e in local_elems:
                 # Sometimes this already returns elements.
-                # Sometimes it returns ids. I handle both.
+                # Sometimes it returns ids. I do both.
                 try:
                     if isinstance(e, DB.Element):
                         elements.append(e)
@@ -96,7 +96,7 @@ def get_referenced_elements_from_tag(tag):
     except:
         pass
 
-    # Method 2: GetTaggedLocalElementIds (if available)
+    #GetTaggedLocalElementIds (if available)
     try:
         local_ids = tag.GetTaggedLocalElementIds()
         if local_ids:
@@ -112,7 +112,7 @@ def get_referenced_elements_from_tag(tag):
     except:
         pass
 
-    # Method 3: GetTaggedElementIds (multi reference style)
+    # GetTaggedElementIds (multi reference style)
     try:
         ref_ids = []
         refs = tag.GetTaggedElementIds()
@@ -136,7 +136,7 @@ def get_referenced_elements_from_tag(tag):
     except:
         pass
 
-    # Method 4: TaggedElementId (single reference)
+    # TaggedElementId (single reference)
     try:
         ref = tag.TaggedElementId
         if ref and ref.ElementId and ref.ElementId != DB.ElementId.InvalidElementId:
@@ -182,14 +182,14 @@ def get_tagged_door_ids_in_views(views, door_id_set):
 
 
 def run():
-    # Main entry point when I click the pyRevit button.
+    # Main entry point when I click the pychilizer button.
 
     doors = get_doors()
     if not doors:
         output.print_md("No doors found in the model.")
         return
 
-    # I store all door ids in a set so I can test membership quickly.
+    # store all door ids in a set so I can test quickly.
     door_ids = set(d.Id for d in doors)
 
     # I get all floor plans and all elevations.
@@ -224,7 +224,7 @@ def run():
         elev_text = "Yes" if elev_tagged else "No"
 
         # If both sides match (both tagged or both not tagged), I say OK.
-        # If one is tagged and the other is not, I say Inconsistent.
+        # If one is tagged and the other is not, it says Inconsistent.
         if plan_tagged == elev_tagged:
             status = "OK"
         else:
