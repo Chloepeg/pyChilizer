@@ -1,139 +1,121 @@
-__title__ = 'Door QA'
-__doc__   = 'Check doors for missing or duplicate Tag (Mark) values and show a summary.'
+__title__ = 'Door Tag QA'
+__doc__   = 'Check doors in the active view for missing door tags.'
 
 from pyrevit import revit, DB, forms, script
 
-# Environment setup
 doc    = revit.doc
 uidoc  = revit.uidoc
 logger = script.get_logger()
 output = script.get_output()
 
-# Collect all door instances in the model
-doors = (DB.FilteredElementCollector(doc)
-         .OfClass(DB.FamilyInstance)
-         .OfCategory(DB.BuiltInCategory.OST_Doors)
-         .ToElements())
 
-if not doors:
-    forms.alert("No doors found in this model.", ok=True)
-else:
-    # door_infos will store info for all doors
-    door_infos = []
-    missing_tag_rows = []
-    duplicate_tag_rows = []
-    # tag_map will map Tag (Mark) value -> list of door infos
-    tag_map = {}
+def get_doors_in_view(view):
+    """Return all door instances visible in the view."""
+    return (DB.FilteredElementCollector(doc, view.Id)
+            .OfClass(DB.FamilyInstance)
+            .OfCategory(DB.BuiltInCategory.OST_Doors)
+            .WhereElementIsNotElementType()
+            .ToElements())
+
+
+def get_door_tags_in_view(view):
+    """Return all door tag annotations in the given view."""
+    return (DB.FilteredElementCollector(doc, view.Id)
+            .OfClass(DB.IndependentTag)
+            .OfCategory(DB.BuiltInCategory.OST_DoorTags)
+            .WhereElementIsNotElementType()
+            .ToElements())
+
+
+def get_tagged_door_ids(tags):
+    """Return a set of ElementIds of doors that are tagged."""
+    tagged_ids = set()
+
+    for tag in tags:
+        try:
+            refs = tag.GetTaggedElementIds()
+            for r in refs:
+                eid = r.ElementId
+                if eid and eid != DB.ElementId.InvalidElementId:
+                    tagged_ids.add(eid)
+        except:
+            pass
+
+    return tagged_ids
+
+
+def run_tag_qa():
+    view = doc.ActiveView
+
+    doors = get_doors_in_view(view)
+    if not doors:
+        forms.alert("No doors found in this view.", ok=True)
+        return
+
+    tags = get_door_tags_in_view(view)
+    tagged_ids = get_tagged_door_ids(tags)
+
+    untagged_rows = []
+    all_rows = []
 
     for d in doors:
-        # Clickable ID in pyRevit output
         id_link = output.linkify(d.Id)
 
-        # Type name (defensive: some weird elements may not have Name)
+        # Type name
         type_elem = doc.GetElement(d.GetTypeId())
-        type_name = "<No Type>"
-        if type_elem:
-            try:
-                type_name = type_elem.Name
-            except AttributeError:
-                type_name = str(type_elem.Id)
+        try:
+            type_name = type_elem.Name
+        except:
+            type_name = "<No Type>"
 
-        # Level name (may be empty or level may not have Name)
-        level_name = ""
+        # Level
         try:
             level = doc.GetElement(d.LevelId)
-            if level:
-                try:
-                    level_name = level.Name
-                except AttributeError:
-                    level_name = str(level.Id)
-        except Exception:
+            level_name = level.Name
+        except:
             level_name = ""
 
-        # Tag value in Revit door tag: underlying parameter is Mark
-        mark_param = d.get_Parameter(DB.BuiltInParameter.ALL_MODEL_MARK)
-        tag_val = ""
-        if mark_param:
-            try:
-                tag_val = mark_param.AsString() or mark_param.AsValueString() or ""
-            except Exception:
-                tag_val = ""
+        # Tagged or not
+        is_tagged = d.Id in tagged_ids
+        tagged_text = "Yes" if is_tagged else "No"
 
-        info = {
-            "id_link": id_link,
-            "type_name": type_name,
-            "level_name": level_name,
-            "tag": tag_val,
-        }
-        door_infos.append(info)
-
-        # Missing Tag: empty or only spaces
-        if not tag_val.strip():
-            missing_tag_rows.append([
-                id_link,
-                type_name,
-                level_name,
-                "(blank)"
-            ])
-        else:
-            # Track non-empty Tags for duplicate detection
-            key = tag_val.strip()
-            if key not in tag_map:
-                tag_map[key] = []
-            tag_map[key].append(info)
-
-    # Build duplicate_tag_rows
-    for tag_value, infos in tag_map.items():
-        if len(infos) > 1:
-            for info in infos:
-                duplicate_tag_rows.append([
-                    info["id_link"],
-                    info["type_name"],
-                    info["level_name"],
-                    tag_value
-                ])
-
-    # Doors with missing Tag
-    output.print_md("## Doors with missing Tag (Mark)")
-    if missing_tag_rows:
-        output.print_table(
-            table_data=missing_tag_rows,
-            columns=["ID", "Type", "Level", "Tag"]
-        )
-    else:
-        output.print_md("No doors with missing Tag.")
-
-    # Doors with duplicate Tag
-    output.print_md("## Doors with duplicate Tag (Mark) values")
-    if duplicate_tag_rows:
-        output.print_table(
-            table_data=duplicate_tag_rows,
-            columns=["ID", "Type", "Level", "Tag"]
-        )
-    else:
-        output.print_md("No duplicate door Tags found.")
-
-    # All doors summary
-    output.print_md("## All Doors (summary)")
-    all_rows = []
-    for info in door_infos:
+        # Build master list
         all_rows.append([
-            info["id_link"],
-            info["type_name"],
-            info["level_name"],
-            info["tag"]
+            id_link,
+            type_name,
+            level_name,
+            tagged_text
         ])
 
+        # Build untagged list
+        if not is_tagged:
+            untagged_rows.append([
+                id_link,
+                type_name,
+                level_name
+            ])
+
+    output.print_md("## Door Tag QA for view: '{}'".format(view.Name))
+
+    # Ungtagged doors
+    output.print_md("### Doors WITHOUT a tag in this view")
+    if untagged_rows:
+        output.print_table(
+            table_data=untagged_rows,
+            columns=["ID", "Type", "Level"]
+        )
+    else:
+        output.print_md("All doors in this view have a tag.")
+
+    # Full list
+    output.print_md("### All doors in this view (tag status)")
     output.print_table(
         table_data=all_rows,
-        columns=["ID", "Type", "Level", "Tag"]
+        columns=["ID", "Type", "Level", "Tagged?"]
     )
 
-    # Log summary only (no blocking popup)
-    num_missing    = len(missing_tag_rows)
-    num_duplicates = len(duplicate_tag_rows)
+    logger.info("Tag QA complete for view '{}'".format(view.Name))
 
-    logger.info(
-        "Door QA: {} doors total, {} with missing Tag, {} duplicate Tag rows."
-        .format(len(doors), num_missing, num_duplicates)
-    )
+
+# Run
+run_tag_qa()
