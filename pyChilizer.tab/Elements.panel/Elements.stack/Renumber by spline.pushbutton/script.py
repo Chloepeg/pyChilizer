@@ -185,13 +185,22 @@ el_dict = {}
 sorted_el_dict = {}
 parameters = []
 
+def get_element_point(el):
+    loc = el.Location
+    if isinstance(loc, DB.LocationPoint):
+        return loc.Point
+    if isinstance(loc, DB.LocationCurve):
+        return loc.Curve.Evaluate(0.5, True)
+    bbox = el.get_BoundingBox(doc.ActiveView)
+    if bbox:
+        return (bbox.Min + bbox.Max) * 0.5
+    return None
+
 for e in elements:
     el = doc.GetElement(e)
-    loc = el.Location
-    if loc:
-        el_dict[el] = loc.Point
-    else:
-        el_dict[el] = el.get_BoundingBox(doc.ActiveView).Min
+    pt = get_element_point(el)
+    if pt:
+        el_dict[el] = pt
 
 for dr, pt in el_dict.items():
     crv = spline.GeometryCurve
